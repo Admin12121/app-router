@@ -2,9 +2,9 @@
 
 # app-router
 
-A minimal Flask app router for server-rendered Python web apps with route-based
-templates, nested layouts, partial navigation, route-local assets, API handlers,
-CSRF protection, and secure defaults.
+A secure, server-driven app router for Flask and Jinja with route-based
+templates, nested layouts, partial navigation, route-local assets, API routes,
+CSRF protection, and server-rendered fallbacks.
 
 <p>
   <img alt="Release v0.1.0" src="https://img.shields.io/badge/RELEASE-v0.1.0-e6b8b8?labelColor=2f2d42&style=flat-square">
@@ -17,29 +17,38 @@ CSRF protection, and secure defaults.
 
 ## Overview
 
-`app-router` is a lightweight Flask extension that brings file-style page
-routing patterns to traditional Flask applications. It lets you register routes
-in Python while rendering predictable Jinja templates such as `page.html`,
-`dashboard/page.html`, and nested `layout.html` files.
+`app-router` is a Flask extension that adds a Next.js-style project shape to
+normal Flask and Jinja applications. Flask remains responsible for routing,
+auth, request handling, sessions, and responses. Jinja remains responsible for
+templates and reusable UI macros. The bundled JavaScript only enhances
+same-origin link navigation; direct requests and JavaScript-disabled browsers
+still receive normal server-rendered HTML.
 
-The router is designed for server-rendered apps that want a smoother navigation
-experience without becoming a full frontend framework. Normal requests render
-complete HTML pages. Internal link clicks can be upgraded by the bundled client
-script into partial JSON requests, replacing only the route boundary that
-changed.
+The Python decorators are the source of truth. Template folders organize views,
+but files do not create routes by themselves.
+
+```txt
+Route declared + matching page.html exists    -> render page
+Route declared + page.html missing            -> 404
+page.html exists + no declared route          -> unreachable
+```
 
 ## Features
 
-- Page routes registered with `@router.page(...)`.
-- JSON/API routes registered with `@router.api(...)`.
-- Nested layouts with route boundaries for partial page updates.
-- Built-in client script served from `/_app/router.js`.
-- Route-local asset rewriting for `./asset.ext` and `@/asset.ext` imports.
+- `@router.page(...)` for server-rendered page routes.
+- `@router.api(...)` for JSON/API routes.
+- Next-style template mapping: `/blog/<slug>` maps to `blog/[slug]/page.html`.
+- Automatic root and nested `layout.html` wrapping.
+- Internal DOM boundaries for partial navigation.
+- Built-in client runtime served from `/_app/router.js`.
+- Local asset rewriting for `./file.ext` and `@/path/file.ext`.
 - Manifest-backed asset serving through `/_app/assets`.
-- Signed, time-limited, session-bound CSRF tokens for unsafe methods.
-- Safe redirect helper with same-origin validation.
-- Default security headers including CSP, `nosniff`, and referrer policy.
-- Small Jinja helpers for class names, HTML attributes, and CSRF inputs.
+- CSRF protection for unsafe page and API methods.
+- Same-origin redirect validation.
+- Built-in fallback 404 and 500 templates.
+- Jinja globals: `csrf_token`, `csrf_input`, `cn`, `html_attrs`, and
+  `app_router`.
+- Default security headers with configurable CSP.
 
 ## Requirements
 
@@ -50,30 +59,18 @@ changed.
 - MarkupSafe
 - itsdangerous
 
-This directory currently contains the package source only. It does not include
-a `pyproject.toml`, `setup.py`, or dependency lock file.
-
-## Installation
-
-For local development, keep this package on your Python path or package it with
-your application. The Python import path used by the current source is
-`flask_app_router`.
-
-```python
-from flask_app_router import AppRouter
-```
-
-If this project is later published as `app-router`, the distribution name can
-be `app-router` while the import package remains `flask_app_router`.
+This repository includes `pyproject.toml` package metadata and the `app-router`
+console script entry point. It does not currently include a dependency lock file
+or tests.
 
 ## Quick Start
 
 ```python
-from flask import Flask, request
-from flask_app_router import AppRouter, router_redirect
+from flask import Flask
+from app_router import AppRouter
 
 app = Flask(__name__)
-app.secret_key = "replace-with-a-strong-secret"
+app.config["SECRET_KEY"] = "change-me"
 
 router = AppRouter(app)
 
@@ -81,92 +78,163 @@ router = AppRouter(app)
 @router.page("/")
 def home():
     return {
-        "name": "Student",
-        "_meta": {
-            "title": "Home",
-            "description": "Welcome page rendered by app-router",
-        },
+        "message": "Hello",
+        "_meta": {"title": "Home"},
+        "_cache": True,
+        "_ttl": 60,
     }
 
 
-@router.page("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        return router_redirect("/")
-    return {}
-
-
-@router.api("/api/status")
-def status():
-    return {"ok": True}
+@router.api("/api/users")
+def users():
+    return {"users": []}
 ```
 
-Create the matching template:
+The matching template for `/` is:
 
 ```html
 <!-- templates/page.html -->
-<h1>Hello {{ name }}</h1>
+<h1>{{ message }}</h1>
 ```
 
-Add CSRF protection to forms that use unsafe methods:
+Run the Flask app normally. The first request renders full HTML. Same-origin
+links are enhanced by the packaged browser runtime when JavaScript is available.
 
-```html
-<form method="post">
-  {{ csrf_input() }}
-  <button type="submit">Submit</button>
-</form>
-```
+## Project Shape
 
-## Routing Model
-
-Routes are declared in Python and mapped to templates automatically unless a
-template is provided explicitly.
-
-```python
-@router.page("/dashboard")
-def dashboard():
-    return {"stats": load_stats()}
-```
-
-By default, `/dashboard` maps to:
-
-```text
-templates/dashboard/page.html
-```
-
-Dynamic Flask route segments map to bracket-style template folders:
-
-```python
-@router.page("/users/<user_id>")
-def user_detail(user_id):
-    return {"user": get_user(user_id)}
-```
-
-This maps to:
-
-```text
-templates/users/[user_id]/page.html
-```
-
-Catch-all `path` converters are intentionally rejected for page routes because
-they make template ownership and asset resolution ambiguous.
-
-## Layouts
-
-`layout.html` files wrap pages and create boundaries for partial navigation.
+A typical consuming Flask app can organize templates like this:
 
 ```text
 templates/
   layout.html
   page.html
-  dashboard/
-    layout.html
+  about/
     page.html
+  admin/
+    layout.html
+    settings/
+      page.html
+  dashboard/
+    page.html
+    _components/
+      sidebar.html
+  components/
+    ui/
+      button.html
+      card.html
+static/
+  app.css
 ```
 
-The root `layout.html` wraps every page. Nested layouts wrap only the routes
-below their folder. Layout templates receive `children`, which should be
-rendered where the child route content belongs.
+Meaning:
+
+- `layout.html`: shared layout wrapper.
+- `page.html`: route page template.
+- `[slug]`: dynamic route segment folder.
+- `components/ui/`: conventional location for reusable Jinja macro files.
+- `_components/`: conventional location for route-local Jinja macro files.
+- `static/`: normal Flask public static assets.
+
+The router itself only gives special meaning to `layout.html`, `page.html`, and
+dynamic folders such as `[slug]`. Component folders are normal Jinja template
+organization and do not create routes.
+
+## Pages
+
+Page routes register Flask routes and render matching Jinja page templates.
+
+```python
+@router.page("/admin/settings", methods=["GET", "POST"])
+def settings():
+    return {
+        "section": "settings",
+        "_meta": {
+            "title": "Settings",
+            "description": "Manage account settings",
+        },
+    }
+```
+
+The router handles the page lifecycle:
+
+```txt
+1. Confirm the matching page template exists.
+2. Validate CSRF for unsafe methods when enabled.
+3. Call the page loader.
+4. Convert the loader result into template context or redirect response.
+5. Render page.html.
+6. Wrap it with available layout.html files.
+7. Return full HTML or a partial JSON patch response.
+```
+
+Page loaders may return:
+
+- `dict`: template context.
+- `None`: empty context.
+- `RedirectResult`: from `router_redirect(...)`.
+- `flask.Response`: direct custom response.
+
+Special dictionary keys:
+
+- `_meta`: `title`, `description`, and `image`.
+- `_cache`: enables public full-page cache headers when truthy.
+- `_ttl`: cache lifetime in seconds when `_cache` is enabled.
+- `_redirect`: redirect URL.
+- `_status`: redirect status code, defaulting to `303`.
+- `_message`: redirect message included in partial redirect responses.
+
+By default, page responses use `Cache-Control: no-store`. Enable `_cache` only
+for public pages.
+
+## Route Mapping
+
+Default route-to-template mapping:
+
+```text
+/                         -> templates/page.html
+/about                    -> templates/about/page.html
+/data/<slug>              -> templates/data/[slug]/page.html
+/user/<id>                -> templates/user/[id]/page.html
+/blog/<year>/<slug>       -> templates/blog/[year]/[slug]/page.html
+/admin/settings           -> templates/admin/settings/page.html
+```
+
+You can override the template:
+
+```python
+@router.page("/profile", template="account/profile.html")
+def profile():
+    return {}
+```
+
+Catch-all Flask `path` converters are rejected for page routes. Mixed
+static/dynamic route segments such as `post-<id>` are also rejected by the
+mapper.
+
+## Blueprints
+
+The router can bind to either a Flask app or a Blueprint.
+
+```python
+from flask import Blueprint
+from app_router import AppRouter
+
+bp = Blueprint("site", __name__, template_folder="templates")
+router = AppRouter(bp)
+
+
+@router.page("/")
+def index():
+    return {}
+```
+
+When bound to a Blueprint, the router initializes itself on the parent Flask app
+when the blueprint is registered.
+
+## Layouts
+
+Layouts wrap pages automatically. Do not use Jinja `{% extends %}` for the
+router layout chain.
 
 ```html
 <!-- templates/layout.html -->
@@ -177,87 +245,397 @@ rendered where the child route content belongs.
     <meta name="viewport" content="width=device-width, initial-scale=1">
   </head>
   <body>
-    {{ children }}
+    <nav>...</nav>
+    {{ children|safe }}
   </body>
 </html>
 ```
 
-## Page Loader Return Values
+Nested layouts wrap descendants:
 
-Page loaders may return:
-
-- `dict`: template context data.
-- `None`: empty template context.
-- `RedirectResult`: redirect generated with `router_redirect(...)`.
-- `flask.Response`: direct custom response.
-
-Special dictionary keys:
-
-- `_meta`: optional `title`, `description`, and `image` metadata.
-- `_redirect`: redirect URL.
-- `_status`: redirect status code, defaulting to `303`.
-- `_message`: optional redirect message for partial navigation.
-- `_cache`: enables public page caching when truthy.
-- `_ttl`: cache lifetime in seconds when `_cache` is enabled.
-
-## API Routes
-
-API loaders are converted to JSON responses unless they return a direct Flask
-`Response`.
-
-```python
-@router.api("/api/profile", methods=["GET"])
-def profile():
-    return {"name": "Ada"}
+```text
+templates/layout.html
+  -> templates/admin/layout.html
+      -> templates/admin/settings/page.html
 ```
 
-Tuple-style responses are supported:
+For `/admin/settings`, the router looks for:
+
+```text
+templates/layout.html
+templates/admin/layout.html
+templates/admin/settings/page.html
+```
+
+The router injects internal boundaries around layout children:
+
+```html
+<div data-router-boundary="root">
+  <div data-router-boundary="admin">
+    ...
+  </div>
+</div>
+```
+
+Developers should render `children` where child content belongs. The boundaries
+are generated by the router and used by the client runtime.
+
+## Jinja Components
+
+The package does not implement a separate component framework. Reusable
+components are standard Jinja macros organized by convention.
+
+Global component convention:
+
+```text
+templates/components/ui/button.html
+templates/components/ui/card.html
+```
+
+Example:
+
+```jinja
+{# templates/components/ui/button.html #}
+{% macro button(variant="default") %}
+  <button class="{{ cn('button', 'button-' ~ variant) }}">
+    {{ caller() }}
+  </button>
+{% endmacro %}
+```
+
+Usage:
+
+```jinja
+{% import "components/ui/button.html" as ui %}
+
+{% call ui.button(variant="primary") %}
+  Save
+{% endcall %}
+```
+
+Route-local component convention:
+
+```text
+templates/dashboard/_components/sidebar.html
+```
+
+Usage:
+
+```jinja
+{% import "dashboard/_components/sidebar.html" as dashboard %}
+{{ dashboard.sidebar() }}
+```
+
+These files are not routed or served by `app-router`; they are normal Jinja
+templates imported by other templates.
+
+## APIs
+
+API routes return JSON and do not render templates, layouts, or partial page
+patches.
+
+```python
+@router.api("/api/users")
+def users():
+    return {"users": []}
+```
+
+Tuple-style return values are supported:
 
 ```python
 return {"created": True}, 201, {"X-App": "app-router"}
 ```
 
-API responses use `Cache-Control: no-store` by default.
+Unsafe API methods are CSRF-protected by default when the route is registered
+with `POST`, `PUT`, `PATCH`, or `DELETE`.
 
-## Assets
+API responses use `Cache-Control: no-store`.
 
-Templates can reference local assets with either relative or alias-style paths:
+## Client Navigation
 
-```html
-<link rel="stylesheet" href="./page.css">
-<script type="module" src="./page.js"></script>
-<img src="@/shared/logo.svg" alt="Logo">
+The first page load is normal Flask SSR:
+
+```http
+GET /admin/settings
 ```
 
-Supported extensions are:
+The returned HTML includes router state metadata and the package-owned client
+script:
+
+```html
+<script type="module" src="/_app/router.js" data-app-router-client></script>
+```
+
+When a user clicks a same-origin link, the client script sends:
+
+```http
+GET /admin/settings
+X-Flask-Router: partial
+X-Flask-Current-Path: /admin
+X-Flask-Current-Tree: root,admin
+Accept: application/json
+```
+
+The server then:
+
+```txt
+1. Resolves the current route from X-Flask-Current-Path.
+2. Recomputes the server-side current layout tree.
+3. Compares it with X-Flask-Current-Tree.
+4. Builds the target route layout tree.
+5. Finds the deepest shared boundary.
+6. Renders the needed page/layout fragment.
+7. Returns a JSON patch response.
+```
+
+Supported partial response modes:
+
+- `patch`: replace a DOM boundary with server-rendered HTML.
+- `reload`: perform normal full-page navigation.
+- `redirect`: navigate to a redirect target.
+
+If the response is not JSON, the state does not match, the boundary is missing,
+or fetch fails, the client falls back to `window.location.assign(...)`.
+
+## Partial Response Shape
+
+A patch response looks like this:
+
+```json
+{
+  "mode": "patch",
+  "url": "/admin/settings",
+  "boundary": "admin",
+  "html": "...rendered html...",
+  "tree": ["root", "admin"],
+  "meta": {
+    "title": "Settings",
+    "description": "Manage account settings",
+    "image": "/static/og/settings.png"
+  },
+  "cache": false,
+  "scripts": [],
+  "styles": []
+}
+```
+
+Metadata from `_meta` is applied on full HTML responses and updated during
+partial navigation:
+
+- `title` updates `<title>` or `document.title`.
+- `description` updates the description meta tag.
+- `image` updates `og:image`.
+
+## Forms and CSRF
+
+Forms are normal Flask forms. They should work without JavaScript.
+
+Unsafe page and API methods are protected by default when registered with
+`POST`, `PUT`, `PATCH`, or `DELETE`.
+
+```jinja
+<form method="post">
+  {{ csrf_input() }}
+  <button type="submit">Save</button>
+</form>
+```
+
+For JavaScript requests, send the token in either supported header:
+
+```http
+X-CSRF-Token: ...
+X-CSRFToken: ...
+```
+
+CSRF behavior:
+
+- Tokens require Flask `SECRET_KEY`.
+- Tokens are signed with `itsdangerous.URLSafeTimedSerializer`.
+- Tokens are tied to a per-session seed.
+- The default token max age is 8 hours.
+- Override max age with `APP_ROUTER_CSRF_MAX_AGE`.
+
+## Local Assets
+
+Route templates and layouts can explicitly reference local assets:
+
+```html
+<script type="module" src="./index.js"></script>
+<link rel="stylesheet" href="./style.css">
+<img src="./hero.webp" alt="Hero">
+```
+
+`./file.ext` resolves relative to the template file that contains the import.
+Only same-directory simple filenames are allowed for `./` imports.
+
+Reusable assets can use the `@/` alias:
+
+```html
+<script type="module" src="@/admin/settings/index.js"></script>
+<link rel="stylesheet" href="@/components/ui/button.css">
+```
+
+`@/path.ext` resolves through the active Jinja loader using the path after
+`@/`.
+
+Only explicit imports are rewritten. A file existing next to `page.html` does
+not load automatically.
+
+Rewritten output uses opaque hashed URLs:
+
+```html
+<script type="module" src="/_app/assets/a8f31c4d9e0f12345678.js"></script>
+```
+
+Allowed extensions:
 
 ```text
 .js, .css, .png, .jpg, .jpeg, .webp, .svg, .woff, .woff2
 ```
 
-During rendering or manifest generation, assets are resolved, hashed, and served
-through the configured asset URL prefix. Parent directory traversal, unsupported
-extensions, missing files, and symlink escapes are rejected.
+Security rules implemented by the asset resolver:
 
-## Build Manifest
+- No direct filesystem paths in browser asset URLs.
+- No `../` imports.
+- No backslashes in alias imports.
+- Unsupported extensions are rejected.
+- Missing files are rejected.
+- Same-directory symlink escapes are rejected for `./` imports.
+- Alias imports with symlink path parts are rejected.
+- Unknown asset IDs return 404.
+- Served assets include `X-Content-Type-Options: nosniff`.
 
-Generate route and asset metadata with the CLI:
+Route-local assets are public, immutable-cache assets by default because
+`private_assets` defaults to `False` in `@router.page(...)`.
 
-```bash
-flask-app-router build --app app:app --output .flask-app-router
+```text
+Cache-Control: public, max-age=31536000, immutable
 ```
 
-For an app factory:
+Use `private_assets=True` when route-local assets should not be cached:
 
-```bash
-flask-app-router build --app 'app:create_app()'
+```python
+@router.page("/admin", private_assets=True)
+def admin():
+    return {}
 ```
 
-The build writes:
+Important: `private_assets=True` does not mean the asset route becomes
+authentication-aware. In the current code it only changes asset cache headers to
+`Cache-Control: no-store`. Protect private pages with normal Flask auth
+decorators or checks on the page route, and do not put secrets in client
+JavaScript or CSS.
 
-- `routes.json`: route, layout, and rendering metadata.
-- `manifest.json`: asset metadata and route asset indexes.
-- `assets/`: copied build assets.
+Shared public files can still live in Flask's normal `static/` folder. CDN
+assets require a CSP change because the default CSP is same-origin.
+
+## Build Metadata
+
+The CLI builds route and asset metadata without executing page loaders or
+pre-rendering HTML. In the normal case, run one command from your Flask project
+root:
+
+```bash
+app-router build
+```
+
+The command auto-detects a Flask app from `FLASK_APP` or common modules such as
+`app.py`, `wsgi.py`, `main.py`, and `application.py`. It looks for `app`,
+`application`, `create_app()`, or `make_app()`.
+
+Output:
+
+```text
+.app-router/
+  manifest.json
+  routes.json
+  assets/
+```
+
+What the build does:
+
+- Scans declared page and API routes.
+- Checks whether each page template exists.
+- Finds matching `layout.html` files.
+- Scans matching page/layout template source for explicit asset imports.
+- Resolves `./file.ext` and `@/path/file.ext`.
+- Copies hashed assets into `.app-router/assets/`.
+- Writes `manifest.json` for runtime asset lookup.
+- Writes `routes.json` for route metadata.
+
+What the build does not do:
+
+- It does not execute page loaders.
+- It does not pre-render HTML.
+- It does not produce static pages.
+- It does not decide static versus dynamic rendering; route metadata currently
+  records dynamic rendering.
+
+At runtime, the router automatically loads `.app-router/manifest.json`
+when it exists. You can override the build directory:
+
+```python
+router = AppRouter(app, build_dir="build/app-router")
+```
+
+or through Flask config:
+
+```python
+app.config["APP_ROUTER_BUILD_DIR"] = "build/app-router"
+```
+
+## Error Pages
+
+The package installs Flask error handlers for 404 and 500 responses. It also
+ships fallback `404.html` and `500.html` package templates.
+
+Override them by creating app templates with the same names:
+
+```text
+templates/
+  404.html
+  500.html
+```
+
+Error templates receive:
+
+- `status_code`
+- `message`
+- `error`
+- `router`
+- `app_router`
+
+If no template is found, the router renders a minimal HTML document shell.
+Error responses use `Cache-Control: no-store`.
+
+## Built-In Jinja Helpers
+
+The router installs these globals:
+
+- `csrf_token(name="default")`: return a signed token string.
+- `csrf_input(name="default")`: render a hidden CSRF input.
+- `cn(...)`: merge CSS class names from strings, mappings, and iterables.
+- `html_attrs(...)`: render escaped HTML attributes.
+- `app_router`: current router instance.
+
+Example:
+
+```jinja
+<form method="post">
+  {{ csrf_input() }}
+  <button
+    {{ html_attrs(
+      class_=cn("button", {"button-primary": primary}),
+      disabled=disabled
+    ) }}
+  >
+    Save
+  </button>
+</form>
+```
+
+Keyword names ending in `_` are rendered without the trailing underscore, so
+`class_` becomes `class`.
 
 ## Configuration
 
@@ -266,74 +644,120 @@ router = AppRouter(
     app,
     asset_url_path="/_app/assets",
     client_url_path="/_app/router.js",
+    partial_header="X-Flask-Router",
     security_headers=True,
     csrf=True,
-    build_dir=".flask-app-router",
+    build_dir=".app-router",
 )
 ```
 
-Flask configuration:
+Defaults:
 
-- `SECRET_KEY`: required for CSRF signing.
-- `FLASK_APP_ROUTER_CSRF_MAX_AGE`: CSRF token lifetime in seconds.
-- `FLASK_APP_ROUTER_BUILD_DIR`: alternate manifest directory.
+- `asset_url_path`: `/_app/assets`
+- `client_url_path`: `/_app/router.js`
+- `partial_header`: `X-Flask-Router`
+- `security_headers`: enabled
+- `csp`: same-origin default CSP
+- `csrf`: enabled
+- `build_dir`: `.app-router`
+
+Default CSP:
+
+```text
+default-src 'self';
+script-src 'self';
+style-src 'self' 'unsafe-inline';
+img-src 'self' data:;
+font-src 'self';
+object-src 'none';
+base-uri 'self';
+frame-ancestors 'none'
+```
+
+Flask config:
+
+- `SECRET_KEY`: required for CSRF token signing.
+- `APP_ROUTER_CSRF_MAX_AGE`: CSRF max age in seconds.
+- `APP_ROUTER_BUILD_DIR`: alternate runtime manifest directory.
 
 ## Security Assessment
 
 No critical vulnerability was identified in the reviewed source.
 
-Implemented controls:
+Implemented protections:
 
-- CSRF tokens are signed with Flask `SECRET_KEY`, time-limited, tied to the
-  current session, and compared with `hmac.compare_digest`.
+- Python decorators are the route source of truth; templates alone do not expose
+  routes.
+- Missing page templates return a 404.
+- Page and API routes use the same loader path for full and partial requests,
+  so normal Flask auth checks still apply.
+- CSRF is enabled by default for unsafe page and API methods.
 - Redirects are limited to local paths or same-origin absolute URLs.
-- Asset serving is manifest-backed and restricts extensions, traversal, and
-  symlink escapes.
-- Private assets receive `Cache-Control: no-store`; public assets use immutable
-  cache headers.
-- API and partial-navigation responses use `Cache-Control: no-store`.
-- Default response hardening includes `Content-Security-Policy`,
-  `X-Content-Type-Options: nosniff`, and `Referrer-Policy`.
+- Partial navigation headers are treated as state hints. Mismatch causes reload.
+- Asset serving is manifest-backed and only serves registered opaque asset IDs.
+- Asset resolution rejects traversal, unsupported extensions, missing files,
+  and symlink escapes covered by the resolver.
+- API, partial, error, and uncached page responses use `Cache-Control: no-store`.
+- Public assets use immutable cache headers and `nosniff`.
+- Default security headers include CSP, `X-Content-Type-Options`, and
+  `Referrer-Policy`.
 
-Known risks and limitations:
+Known limitations and risks:
 
-- The default CSP includes `style-src 'unsafe-inline'`.
-- Partial navigation uses `innerHTML` to apply trusted server-rendered HTML.
-  Application templates must rely on Jinja escaping and avoid unsafe `Markup`
-  usage with untrusted input.
-- CSRF protection is only as strong as the Flask `SECRET_KEY`.
-- This folder does not include dependency metadata or a lock file, so dependency
-  versions are not reproducible from this source tree alone.
-- No automated tests are included in this directory.
+- The default CSP allows inline styles with `style-src 'unsafe-inline'`.
+- Partial navigation uses `innerHTML` to insert trusted server-rendered HTML.
+  Keep Jinja autoescape enabled and avoid marking untrusted input as safe.
+- Inline page scripts are not given a lifecycle by the client runtime; prefer
+  explicit module files.
+- `private_assets=True` does not enforce route authorization.
+- Build metadata stores source paths in `manifest.json`; keep build artifacts
+  out of public source disclosure channels if paths are sensitive.
+- This source tree does not include a dependency lock file or tests.
 
 Recommended hardening:
 
-- Add `pyproject.toml` with package metadata, dependency ranges, and the CLI
-  entry point.
-- Add tests for CSRF validation, redirect safety, asset traversal rejection,
-  manifest loading, error rendering, and partial navigation.
-- Use a stricter CSP if inline styles are not required by consuming apps.
-- Document template trust boundaries for applications that pass user-generated
-  HTML into templates.
+- Add tests for route mapping, layout wrapping, CSRF, redirects, asset resolver
+  security, manifest loading, error templates, and partial navigation.
+- Use a stricter CSP if consuming templates do not need inline styles.
+- Sanitize rich text before rendering it into templates.
+- Protect private pages with normal Flask auth/RBAC and keep secrets out of
+  frontend assets.
+
+## Current Limitations
+
+- No automatic route creation from files.
+- No catch-all page routes using Flask `path` converters.
+- No static pre-rendering.
+- No streaming rendering.
+- No JavaScript component hydration.
+- No bundled UI component library.
+- No automatic frontend bundling or TypeScript pipeline.
+- No prefetching.
+- No page-specific JavaScript init/destroy lifecycle.
+- No auth-aware private asset serving.
+- No nested error boundaries.
 
 ## Project Structure
 
 ```text
 app-router/
-  __init__.py          Public API exports
-  router.py            Core router, rendering, headers, and internal routes
-  assets.py            Asset resolver, rewriter, manifest builder, and server
-  csrf.py              CSRF token generation and validation
-  helpers.py           Jinja and routing helpers
-  responses.py         Redirect response helper
-  exceptions.py        Package-specific exceptions
-  static/router.js     Partial-navigation browser client
-  templates/           Built-in 404 and 500 templates
+  pyproject.toml       Package metadata and app-router console script
+  app_router/
+    __init__.py        Public API exports
+    router.py          Core router, rendering, headers, errors, and internal routes
+    assets.py          Asset resolver, HTML rewriter, manifest builder, and server
+    csrf.py            CSRF token generation and validation
+    helpers.py         Jinja and routing helpers
+    responses.py       Redirect response helper
+    exceptions.py      Package-specific exceptions
+    static/router.js   Partial-navigation browser runtime
+    templates/         Built-in 404 and 500 templates
   README.md            Project documentation
 ```
 
 ## Verification
 
-The Python source was parsed successfully with `ast`. A normal `compileall`
-check could not complete in this environment because the filesystem is
-read-only and bytecode writes to `__pycache__` failed.
+This README was matched against the current source files in this directory.
+Python source parsing with `ast` succeeds. A normal `compileall` check could not
+complete in this environment because the filesystem is read-only and bytecode
+writes to `__pycache__` failed.

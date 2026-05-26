@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "app-router"
+version = "0.1.0"
+description = "A secure, server-driven app router for Flask and Jinja."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "Flask",
+    "Jinja2",
+    "MarkupSafe",
+    "Werkzeug",
+    "itsdangerous",
+]
+
+[project.scripts]
+app-router = "app_router.cli:main"
+
+[tool.setuptools]
+packages = ["app_router"]
+
+[tool.setuptools.package-data]
+app_router = ["py.typed", "templates/*.html", "static/*.js"]
