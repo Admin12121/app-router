@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _load_app(import_path: str | None = None) -> Flask:
+    _ensure_cwd_on_path()
+
     if import_path:
         return _load_app_from_import_path(import_path)
 
@@ -68,6 +71,12 @@ def _load_app(import_path: str | None = None) -> Flask:
         "Could not auto-detect a Flask app. Define app or create_app() in "
         "app.py, wsgi.py, main.py, or set FLASK_APP=module:app."
     )
+
+
+def _ensure_cwd_on_path() -> None:
+    cwd = str(Path.cwd())
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
 
 
 def _load_app_from_import_path(import_path: str) -> Flask:

@@ -584,6 +584,34 @@ or through Flask config:
 app.config["APP_ROUTER_BUILD_DIR"] = "build/app-router"
 ```
 
+## Publishing
+
+Version `0.1.0` is packaged with `pyproject.toml`.
+
+Build the source distribution and wheel:
+
+```bash
+python -m build
+```
+
+Validate the distributions:
+
+```bash
+python -m twine check dist/*
+```
+
+Upload to TestPyPI first:
+
+```bash
+python -m twine upload --repository testpypi dist/*
+```
+
+Upload to PyPI after the TestPyPI install check passes:
+
+```bash
+python -m twine upload dist/*
+```
+
 ## Error Pages
 
 The package installs Flask error handlers for 404 and 500 responses. It also
@@ -758,6 +786,7 @@ app-router/
 ## Verification
 
 This README was matched against the current source files in this directory.
-Python source parsing with `ast` succeeds. A normal `compileall` check could not
-complete in this environment because the filesystem is read-only and bytecode
-writes to `__pycache__` failed.
+The package builds successfully as an sdist and wheel. The wheel installs in a
+temporary environment, imports as `app_router`, exposes the `app-router` console
+script, and `app-router build` generates `.app-router/` metadata for a smoke
+test Flask app.
